@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+.env
+.venv
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Chroma DB persistence
+chroma_db/
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# Logs and runtime files
+*.log
+*.sqlite
+
+# OS files
+.DS_Store
+Thumbs.db
