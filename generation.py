@@ -88,7 +88,7 @@ def verify_citations(citations: List[Dict[str, Any]], chunks: List[Dict[str, Any
 
 def answer_query(query: str, top_k: int = 3) -> Dict[str, Any]:
     """Retrieve context, generate an answer, and verify citation claims."""
-    chunks = retrieve(query, top_k=top_k)
+    chunks = retrieve(query, top_k=10)
     prompt = _build_prompt(query, chunks)
     answer_text = _call_huggingface(prompt)
     citations = _extract_citations(answer_text)

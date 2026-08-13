@@ -6,6 +6,21 @@ from langchain_core.documents import Document
 
 from vector_store import _get_collection, _load_embedding_model
 
+_CROSS_ENCODER = None
+
+
+def _load_cross_encoder():
+    """Lazy-load the cross-encoder model for reranking."""
+    global _CROSS_ENCODER
+    if _CROSS_ENCODER is None:
+        try:
+            from sentence_transformers import CrossEncoder
+        except ImportError as exc:  # pragma: no cover - optional runtime dependency
+            raise RuntimeError("Install sentence-transformers to enable cross-encoder reranking") from exc
+
+        _CROSS_ENCODER = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+    return _CROSS_ENCODER
+
 
 def to_langchain_documents(chunks: List[Dict[str, Any]]) -> List[Document]:
     """Convert chunk dictionaries into LangChain Document objects."""
@@ -17,9 +32,17 @@ def to_langchain_documents(chunks: List[Dict[str, Any]]) -> List[Document]:
 
 
 def retrieve(query: str, top_k: int = 10) -> List[Dict[str, Any]]:
-    """Run vector retrieval and rerank the top candidates with a lightweight LangChain-style flow."""
+    """Retrieve candidates from ChromaDB and rerank them with a cross-encoder.
+
+    This is a two-stage flow:
+    1. Use ChromaDB's vector search to fetch up to 10 candidate chunks by
+       embedding distance.
+    2. Rerank those candidates with a cross-encoder over (query, chunk_content)
+       pairs and return the top 3 results.
+    """
     _, collection = _get_collection()
     model = _load_embedding_model()
+    cross_encoder = _load_cross_encoder()
 
     query_embedding = model.encode([query], convert_to_numpy=True)[0].tolist()
     results = collection.query(
@@ -35,16 +58,18 @@ def retrieve(query: str, top_k: int = 10) -> List[Dict[str, Any]]:
     if not documents:
         return []
 
-    ranked = sorted(zip(documents, metadatas, distances), key=lambda item: item[2])
-    reranked: List[Dict[str, Any]] = []
-    for doc, metadata, distance in ranked[:3]:
-        reranked.append(
-            {
-                "content": doc,
-                "metadata": metadata,
-                "distance": float(distance),
-                "rerank_score": float(-distance),
-            }
-        )
+    pairs = [(query, doc) for doc in documents]
+    scores = cross_encoder.predict(pairs)
 
-    return reranked
+    scored = [
+        {
+            "content": doc,
+            "metadata": metadata,
+            "distance": float(distance),
+            "rerank_score": float(score),
+        }
+        for doc, metadata, distance, score in zip(documents, metadatas, distances, scores)
+    ]
+
+    scored.sort(key=lambda item: item["rerank_score"], reverse=True)
+    return scored[:3]
