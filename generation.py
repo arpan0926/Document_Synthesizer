@@ -2,9 +2,22 @@ from __future__ import annotations
 
 import os
 import re
+from pathlib import Path
 from typing import Any, Dict, List
 
 import requests
+
+# Load .env from project root if present (optional, requires python-dotenv)
+try:
+    from dotenv import load_dotenv
+
+    root = Path(__file__).resolve().parent
+    env_path = root / ".env"
+    if env_path.exists():
+        load_dotenv(dotenv_path=env_path)
+except Exception:
+    # dotenv is optional; if it's not installed, environment vars must be set externally
+    pass
 
 from retrieval import retrieve, to_langchain_documents
 
@@ -36,11 +49,12 @@ def _build_prompt(query: str, chunks: List[Dict[str, Any]]) -> str:
 
 
 def _call_huggingface(prompt: str) -> str:
-    token = os.getenv("HF_API_TOKEN")
+    # Support either HF_API_TOKEN or HF_TOKEN (some systems use HF_TOKEN)
+    token = os.getenv("HF_API_TOKEN") or os.getenv("HF_TOKEN")
     if not token:
         return "No Hugging Face token configured; using fallback summary."
 
-    model = os.getenv("HF_MODEL", "meta-llama/Meta-Llama-3-8B-Instruct")
+    model = os.getenv("HF_MODEL", "meta-llama/Llama-3.1-8B-Instruct")
     payload = {"inputs": prompt, "parameters": {"max_new_tokens": 300, "temperature": 0.1}}
     headers = {"Authorization": f"Bearer {token}"}
     try:
@@ -50,8 +64,17 @@ def _call_huggingface(prompt: str) -> str:
             json=payload,
             timeout=60,
         )
-        response.raise_for_status()
-        data = response.json()
+        try:
+            response.raise_for_status()
+            data = response.json()
+        except Exception as exc:
+            # Provide more info when inference fails (without exposing token)
+            body = None
+            try:
+                body = response.text
+            except Exception:
+                body = "<unavailable>"
+            return f"Inference call failed (status={response.status_code}): {body}"
         if isinstance(data, list) and data:
             return data[0].get("generated_text", "")
         if isinstance(data, dict):

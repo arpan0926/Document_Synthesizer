@@ -27,3 +27,33 @@ chroma_db/
 # OS files
 .DS_Store
 Thumbs.db
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Test & Coverage
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Project-specific
+data/*.pdf
+eval_results.json
+*.egg
+*.egg-info
+
+# Environment & Secrets
+.env
+.env.*
+.secret*
+
+# Cache
+*.cache
+*.pkl
+*.pickle

@@ -31,18 +31,20 @@ def to_langchain_documents(chunks: List[Dict[str, Any]]) -> List[Document]:
     return documents
 
 
-def retrieve(query: str, top_k: int = 10) -> List[Dict[str, Any]]:
-    """Retrieve candidates from ChromaDB and rerank them with a cross-encoder.
+def retrieve(query: str, top_k: int = 10, rerank: bool = True) -> List[Dict[str, Any]]:
+    """Retrieve candidates from ChromaDB and optionally rerank them with a cross-encoder.
 
-    This is a two-stage flow:
-    1. Use ChromaDB's vector search to fetch up to 10 candidate chunks by
+    This is a two-stage flow when `rerank` is True:
+    1. Use ChromaDB's vector search to fetch up to `min(top_k, 10)` candidate chunks by
        embedding distance.
     2. Rerank those candidates with a cross-encoder over (query, chunk_content)
        pairs and return the top 3 results.
+
+    If `rerank` is False, return the top 3 candidates ordered by raw ChromaDB
+    distance (ascending).
     """
     _, collection = _get_collection()
     model = _load_embedding_model()
-    cross_encoder = _load_cross_encoder()
 
     query_embedding = model.encode([query], convert_to_numpy=True)[0].tolist()
     results = collection.query(
@@ -58,6 +60,20 @@ def retrieve(query: str, top_k: int = 10) -> List[Dict[str, Any]]:
     if not documents:
         return []
 
+    if not rerank:
+        scored = [
+            {
+                "content": doc,
+                "metadata": metadata,
+                "distance": float(distance),
+                "rerank_score": None,
+            }
+            for doc, metadata, distance in zip(documents, metadatas, distances)
+        ]
+        scored.sort(key=lambda item: item["distance"])  # lower distance = more similar
+        return scored[:3]
+
+    cross_encoder = _load_cross_encoder()
     pairs = [(query, doc) for doc in documents]
     scores = cross_encoder.predict(pairs)
 

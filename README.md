@@ -43,7 +43,8 @@ python main.py
 
 ## Notes
 - Use text-based PDFs for best results
-- Set `HF_API_TOKEN` environment variable for Hugging Face generation
+-- Set `HF_API_TOKEN` environment variable for Hugging Face generation
+	and optionally set `HF_MODEL` to `meta-llama/Llama-3.1-8B-Instruct` for best results.
 
 ## Tests
 ```powershell

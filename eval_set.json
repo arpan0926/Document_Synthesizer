@@ -1,0 +1,12 @@
+[
+  {
+    "query": "What accuracy did the model achieve on the test set?",
+    "expected_source_doc": "2608.11572v1.pdf",
+    "expected_page": 4
+  },
+  {
+    "query": "Which optimizer was used in experiment B?",
+    "expected_source_doc": "2608.11572v1.pdf",
+    "expected_page": 2
+  }
+]
