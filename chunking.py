@@ -25,8 +25,8 @@ def chunk_text(
     text: str,
     source_doc: str,
     page_number: int,
-    max_tokens: int = 500,
-    overlap_tokens: int = 50,
+    max_tokens: int = 256,
+    overlap_tokens: int = 32,
 ) -> List[Dict[str, Any]]:
     """Chunk text by paragraph/section while keeping token size bounded."""
     paragraphs = _split_paragraphs(text)
@@ -35,6 +35,7 @@ def chunk_text(
 
     chunks: List[Dict[str, Any]] = []
     start_index = 0
+    parent_context = text.strip()  # Full-page context attached to child metadata
 
     while start_index < len(paragraphs):
         end_index = start_index
@@ -61,6 +62,7 @@ def chunk_text(
                     "source_doc": source_doc,
                     "page_number": page_number,
                     "chunk_type": "text",
+                    "parent_context": parent_context,
                 },
             }
         )
@@ -97,13 +99,15 @@ def dataframe_to_markdown(df: Any) -> str:
 
 
 def chunk_table(df: Any, source_doc: str, page_number: int) -> Dict[str, Any]:
-    """Keep each table as a single chunk and preserve the original DataFrame."""
+    """Keep each table as a single chunk and attach markdown parent_context."""
+    md_table = dataframe_to_markdown(df)
     return {
-        "content": dataframe_to_markdown(df),
+        "content": md_table,
         "metadata": {
             "source_doc": source_doc,
             "page_number": page_number,
             "chunk_type": "table",
+            "parent_context": md_table,
             "df": df,
         },
     }

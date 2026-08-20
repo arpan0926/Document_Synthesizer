@@ -48,40 +48,27 @@ def _build_prompt(query: str, chunks: List[Dict[str, Any]]) -> str:
     return prompt.format(question=query, context=context)
 
 
-def _call_huggingface(prompt: str) -> str:
-    # Support either HF_API_TOKEN or HF_TOKEN (some systems use HF_TOKEN)
-    token = os.getenv("HF_API_TOKEN") or os.getenv("HF_TOKEN")
-    if not token:
-        return "No Hugging Face token configured; using fallback summary."
-
-    model = os.getenv("HF_MODEL", "meta-llama/Llama-3.1-8B-Instruct")
-    payload = {"inputs": prompt, "parameters": {"max_new_tokens": 300, "temperature": 0.1}}
-    headers = {"Authorization": f"Bearer {token}"}
+def _call_ollama(prompt: str) -> str:
+    model = os.getenv("OLLAMA_MODEL", "llama3.1")
+    payload = {
+        "model": model,
+        "prompt": prompt,
+        "stream": False,
+        "options": {
+            "temperature": 0.1
+        }
+    }
     try:
         response = requests.post(
-            f"https://api-inference.huggingface.co/models/{model}",
-            headers=headers,
+            "http://localhost:11434/api/generate",
             json=payload,
-            timeout=60,
+            timeout=120,
         )
-        try:
-            response.raise_for_status()
-            data = response.json()
-        except Exception as exc:
-            # Provide more info when inference fails (without exposing token)
-            body = None
-            try:
-                body = response.text
-            except Exception:
-                body = "<unavailable>"
-            return f"Inference call failed (status={response.status_code}): {body}"
-        if isinstance(data, list) and data:
-            return data[0].get("generated_text", "")
-        if isinstance(data, dict):
-            return data.get("generated_text", "")
-    except Exception:
-        return "Inference call failed; using fallback summary."
-    return "Fallback summary due to an empty response."
+        response.raise_for_status()
+        data = response.json()
+        return data.get("response", "")
+    except Exception as e:
+        return f"Inference call failed ({type(e).__name__}: {e}); is Ollama running locally? Using fallback summary."
 
 
 def _extract_citations(text: str) -> List[Dict[str, Any]]:
@@ -113,7 +100,7 @@ def answer_query(query: str, top_k: int = 3) -> Dict[str, Any]:
     """Retrieve context, generate an answer, and verify citation claims."""
     chunks = retrieve(query, top_k=10)
     prompt = _build_prompt(query, chunks)
-    answer_text = _call_huggingface(prompt)
+    answer_text = _call_ollama(prompt)
     citations = _extract_citations(answer_text)
     verification = verify_citations(citations, chunks)
 

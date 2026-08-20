@@ -10,3 +10,5 @@ langchain-chroma==0.2.6
 pytest==8.4.1
 fpdf==1.7.2
 python-dotenv==1.0.0
+rank_bm25>=0.2.2
+flashrank>=0.2.0

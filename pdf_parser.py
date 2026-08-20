@@ -30,8 +30,35 @@ def parse_document(pdf_path: str | Path) -> Dict[str, Any]:
     try:
         with pdfplumber.open(str(pdf_path)) as pdf:
             for page_number, page in enumerate(pdf.pages, start=1):
-                text = page.extract_text() or ""
-                pages.append({"page_number": page_number, "text": text.strip()})
+                raw_text = page.extract_text() or ""
+                
+                # Extract tables via pdfplumber and convert to Markdown
+                extracted_tables = page.extract_tables() or []
+                table_markdowns: List[str] = []
+                
+                for table in extracted_tables:
+                    if not table or len(table) < 2:
+                        continue
+                    headers = [str(cell or "").strip().replace("\n", " ") for cell in table[0]]
+                    header_line = "| " + " | ".join(headers) + " |"
+                    separator = "| " + " | ".join(["---"] * len(headers)) + " |"
+                    
+                    rows = []
+                    for row in table[1:]:
+                        cleaned_row = [str(cell or "").strip().replace("\n", " ") for cell in row]
+                        rows.append("| " + " | ".join(cleaned_row) + " |")
+                        
+                    table_md = "\n".join([header_line, separator] + rows)
+                    table_markdowns.append(table_md)
+                
+                full_page_text = raw_text.strip()
+                if table_markdowns:
+                    full_page_text += "\n\n### Extracted Tables ###\n" + "\n\n".join(table_markdowns)
+                    
+                pages.append({
+                    "page_number": page_number,
+                    "text": full_page_text,
+                })
     except Exception:
         pages = []
 
