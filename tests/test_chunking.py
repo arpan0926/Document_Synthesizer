@@ -24,6 +24,20 @@ class ChunkingTests(unittest.TestCase):
         self.assertEqual(chunk["metadata"]["source_doc"], "paper.pdf")
         self.assertIs(chunk["metadata"]["df"], df)
 
+    def test_chunk_text_handles_large_paragraph(self) -> None:
+        # A single paragraph with many words that will definitely exceed max_tokens=10
+        text = "word " * 50
+        chunks = chunk_text(text, source_doc="paper.pdf", page_number=3, max_tokens=10, overlap_tokens=2)
+        
+        self.assertGreater(len(chunks), 1)
+        # Verify reconstruction
+        reconstructed = " ".join(chunk["content"] for chunk in chunks)
+        # Check that it contains all the original words (overlap will add duplicates, but the core content must exist)
+        original_words = text.strip().split()
+        reconstructed_words = reconstructed.strip().split()
+        for word in original_words:
+            self.assertIn(word, reconstructed_words)
+
 
 if __name__ == "__main__":
     unittest.main()

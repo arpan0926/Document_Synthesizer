@@ -10,14 +10,13 @@ import requests
 # Load .env from project root if present (optional, requires python-dotenv)
 try:
     from dotenv import load_dotenv
+except ImportError:  # pragma: no cover - dependency is declared at runtime
+    load_dotenv = None
 
-    root = Path(__file__).resolve().parent
-    env_path = root / ".env"
-    if env_path.exists():
-        load_dotenv(dotenv_path=env_path)
-except Exception:
-    # dotenv is optional; if it's not installed, environment vars must be set externally
-    pass
+root = Path(__file__).resolve().parent
+env_path = root / ".env"
+if load_dotenv is not None and env_path.exists():
+    load_dotenv(dotenv_path=env_path)
 
 from retrieval import retrieve, to_langchain_documents
 
@@ -60,15 +59,21 @@ def _call_ollama(prompt: str) -> str:
     }
     try:
         response = requests.post(
-            "http://localhost:11434/api/generate",
+            os.getenv("OLLAMA_URL", "http://localhost:11434") + "/api/generate",
             json=payload,
-            timeout=120,
+            timeout=float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "120")),
         )
         response.raise_for_status()
         data = response.json()
-        return data.get("response", "")
-    except Exception as e:
-        return f"Inference call failed ({type(e).__name__}: {e}); is Ollama running locally? Using fallback summary."
+    except requests.RequestException as exc:
+        raise RuntimeError("Ollama inference request failed; verify the configured service is reachable") from exc
+    except ValueError as exc:
+        raise RuntimeError("Ollama returned malformed JSON") from exc
+
+    answer = data.get("response") if isinstance(data, dict) else None
+    if not isinstance(answer, str) or not answer.strip():
+        raise RuntimeError("Ollama response did not contain a non-empty 'response' string")
+    return answer
 
 
 def _extract_citations(text: str) -> List[Dict[str, Any]]:
@@ -98,7 +103,7 @@ def verify_citations(citations: List[Dict[str, Any]], chunks: List[Dict[str, Any
 
 def answer_query(query: str, top_k: int = 3) -> Dict[str, Any]:
     """Retrieve context, generate an answer, and verify citation claims."""
-    chunks = retrieve(query, top_k=10)
+    chunks = retrieve(query, top_k=top_k)
     prompt = _build_prompt(query, chunks)
     answer_text = _call_ollama(prompt)
     citations = _extract_citations(answer_text)

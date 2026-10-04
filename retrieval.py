@@ -62,7 +62,15 @@ def retrieve(query: str, top_k: int = 40, rerank: bool = True) -> List[Dict[str,
     2. Reciprocal Rank Fusion (RRF).
     3. FlashRank stage-2 reranking returning top 3 candidates.
     """
+    if not isinstance(query, str) or not query.strip():
+        raise ValueError("query must be a non-empty string")
+    if not isinstance(top_k, int) or isinstance(top_k, bool) or top_k < 1:
+        raise ValueError("top_k must be a positive integer")
+
     _, collection = _get_collection()
+    if collection.count() == 0:
+        return []
+
     model = _load_embedding_model()
 
     # 1. First-Stage Dense Vector Search
@@ -111,8 +119,8 @@ def retrieve(query: str, top_k: int = 40, rerank: bool = True) -> List[Dict[str,
                 for idx in top_bm25_indices
                 if bm25_scores[idx] > 0
             ]
-        except Exception:
-            bm25_candidates = []
+        except (IndexError, TypeError, ValueError) as exc:
+            raise RuntimeError("BM25 retrieval failed") from exc
 
     # 3. Reciprocal Rank Fusion (RRF)
     fused_candidates = (
@@ -125,7 +133,7 @@ def retrieve(query: str, top_k: int = 40, rerank: bool = True) -> List[Dict[str,
         return []
 
     if not rerank:
-        return fused_candidates[:3]
+        return fused_candidates[:top_k]
 
     # 4. Stage-2 Fast Reranking via FlashRank
     try:
@@ -150,5 +158,7 @@ def retrieve(query: str, top_k: int = 40, rerank: bool = True) -> List[Dict[str,
         ]
         scored.sort(key=lambda item: item["rerank_score"], reverse=True)
         return scored[:3]
-    except Exception:
-        return fused_candidates[:3]
+    except ImportError as exc:
+        raise RuntimeError("Install flashrank to enable reranking") from exc
+    except (RuntimeError, TypeError, ValueError, KeyError) as exc:
+        raise RuntimeError("Reranking failed") from exc

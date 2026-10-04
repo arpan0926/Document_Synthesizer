@@ -21,6 +21,43 @@ def _split_paragraphs(text: str) -> List[str]:
     return cleaned
 
 
+def _split_large_paragraph(paragraph: str, max_tokens: int, overlap_tokens: int) -> List[str]:
+    """Split a single large paragraph into smaller chunks of bounded token count."""
+    words = paragraph.split(" ")
+    sub_chunks = []
+    start = 0
+    while start < len(words):
+        end = start
+        tokens = 0
+        while end < len(words):
+            word_tokens = _estimate_tokens(words[end])
+            if tokens + word_tokens + 1 <= max_tokens or end == start:
+                tokens += word_tokens + 1
+                end += 1
+            else:
+                break
+        sub_chunks.append(" ".join(words[start:end]))
+        
+        if end >= len(words):
+            break
+            
+        # backtrack for overlap
+        overlap_tokens_count = 0
+        overlap_start = end
+        while overlap_start > start:
+            word_tokens = _estimate_tokens(words[overlap_start - 1])
+            if overlap_tokens_count + word_tokens + 1 <= overlap_tokens:
+                overlap_tokens_count += word_tokens + 1
+                overlap_start -= 1
+            else:
+                break
+        if overlap_start < end:
+            start = overlap_start
+        else:
+            start = end
+    return sub_chunks
+
+
 def chunk_text(
     text: str,
     source_doc: str,
@@ -52,7 +89,23 @@ def chunk_text(
 
         chunk_paragraphs = paragraphs[start_index:end_index]
         if not chunk_paragraphs:
-            break
+            # First paragraph is too large to fit in max_tokens
+            large_paragraph = paragraphs[start_index]
+            sub_chunks = _split_large_paragraph(large_paragraph, max_tokens, overlap_tokens)
+            for sub_content in sub_chunks:
+                chunks.append(
+                    {
+                        "content": sub_content,
+                        "metadata": {
+                            "source_doc": source_doc,
+                            "page_number": page_number,
+                            "chunk_type": "text",
+                            "parent_context": parent_context,
+                        },
+                    }
+                )
+            start_index += 1
+            continue
 
         content = " ".join(chunk_paragraphs)
         chunks.append(

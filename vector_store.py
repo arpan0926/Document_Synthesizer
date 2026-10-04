@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from threading import RLock
 from typing import Any, Dict, List, Tuple
 
 from pdf_parser import parse_document
@@ -12,6 +13,7 @@ _PERSIST_DIRECTORY = Path(__file__).resolve().parent / "chroma_db"
 _EMBEDDING_MODEL = None
 _BM25_INDEX = None
 _ALL_DOCS_CACHE = None
+_STATE_LOCK = RLock()
 
 
 def _sanitize_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
@@ -46,7 +48,7 @@ def _get_collection() -> Tuple[Any, Any]:
     client = chromadb.PersistentClient(path=str(_PERSIST_DIRECTORY))
     try:
         collection = client.get_collection(name=_COLLECTION_NAME)
-    except Exception:
+    except chromadb.errors.NotFoundError:
         collection = client.create_collection(name=_COLLECTION_NAME)
     return client, collection
 
@@ -54,80 +56,101 @@ def _get_collection() -> Tuple[Any, Any]:
 def _get_all_documents() -> List[Dict[str, Any]]:
     """Fetch all indexed documents from ChromaDB."""
     global _ALL_DOCS_CACHE
-    if _ALL_DOCS_CACHE is not None:
-        return _ALL_DOCS_CACHE
+    with _STATE_LOCK:
+        if _ALL_DOCS_CACHE is not None:
+            return _ALL_DOCS_CACHE
 
-    _, collection = _get_collection()
-    data = collection.get(include=["documents", "metadatas"])
+        _, collection = _get_collection()
+        data = collection.get(include=["documents", "metadatas"])
 
-    docs: List[Dict[str, Any]] = []
-    ids = data.get("ids", [])
-    documents = data.get("documents", [])
-    metadatas = data.get("metadatas", [])
+        docs: List[Dict[str, Any]] = []
+        ids = data.get("ids", [])
+        documents = data.get("documents", [])
+        metadatas = data.get("metadatas", [])
 
-    for doc_id, doc, meta in zip(ids, documents, metadatas):
-        docs.append({"id": doc_id, "content": doc, "metadata": meta or {}})
-    
-    _ALL_DOCS_CACHE = docs
-    return docs
+        if not (len(ids) == len(documents) == len(metadatas)):
+            raise RuntimeError("Vector store returned misaligned document metadata")
+
+        for doc_id, doc, meta in zip(ids, documents, metadatas):
+            docs.append({"id": doc_id, "content": doc, "metadata": meta or {}})
+
+        _ALL_DOCS_CACHE = docs
+        return docs
 
 
 def _load_bm25_index():
     """Build and cache the BM25 index on first load."""
     global _BM25_INDEX
-    if _BM25_INDEX is None:
-        all_docs = _get_all_documents()
-        if all_docs:
-            try:
-                from rank_bm25 import BM25Okapi
+    with _STATE_LOCK:
+        if _BM25_INDEX is None:
+            all_docs = _get_all_documents()
+            if all_docs:
+                try:
+                    from rank_bm25 import BM25Okapi
+                except ImportError as exc:
+                    raise RuntimeError("Install rank-bm25 to enable sparse retrieval") from exc
                 corpus_tokens = [d["content"].lower().split() for d in all_docs]
                 _BM25_INDEX = BM25Okapi(corpus_tokens)
-            except Exception:
-                _BM25_INDEX = None
-    return _BM25_INDEX
+        return _BM25_INDEX
 
 
 def clear_cache():
     """Clear BM25 cache when new docs are ingested."""
     global _BM25_INDEX, _ALL_DOCS_CACHE
-    _BM25_INDEX = None
-    _ALL_DOCS_CACHE = None
+    with _STATE_LOCK:
+        _BM25_INDEX = None
+        _ALL_DOCS_CACHE = None
 
 
 def ingest_document(pdf_path: str | Path) -> List[Dict[str, Any]]:
     """Parse, chunk, embed, and store a document in ChromaDB."""
-    document = parse_document(pdf_path)
-    chunks: List[Dict[str, Any]] = []
+    with _STATE_LOCK:
+        document = parse_document(pdf_path)
+        chunks: List[Dict[str, Any]] = []
 
-    for page in document.get("pages", []):
-        if page.get("text"):
-            chunks.extend(
-                chunk_text(
-                    page["text"],
-                    source_doc=document["source_doc"],
-                    page_number=page["page_number"],
+        for page in document.get("pages", []):
+            if page.get("text"):
+                chunks.extend(
+                    chunk_text(
+                        page["text"],
+                        source_doc=document["source_doc"],
+                        page_number=page["page_number"],
+                    )
                 )
-            )
 
-    for table in document.get("tables", []):
-        chunks.append(
-            chunk_table(
-                table["df"],
-                source_doc=document["source_doc"],
-                page_number=table["page"],
-            )
-        )
+        for table in document.get("tables", []):
+            if "content" in table:
+                chunks.append(
+                    {
+                        "content": table["content"],
+                        "metadata": {
+                            "source_doc": document["source_doc"],
+                            "page_number": table["page"],
+                            "chunk_type": "table",
+                            "parent_context": table["content"],
+                        },
+                    }
+                )
+            else:
+                chunks.append(
+                    chunk_table(
+                        table["df"],
+                        source_doc=document["source_doc"],
+                        page_number=table["page"],
+                    )
+                )
 
-    if not chunks:
-        return []
+        if not chunks:
+            return []
 
-    texts = [chunk["content"] for chunk in chunks]
-    metadatas = [_sanitize_metadata(chunk["metadata"]) for chunk in chunks]
-    ids = [f"{document['source_doc']}:{index}" for index in range(len(chunks))]
+        texts = [chunk["content"] for chunk in chunks]
+        metadatas = [_sanitize_metadata(chunk["metadata"]) for chunk in chunks]
+        ids = [f"{document['source_doc']}:{index}" for index in range(len(chunks))]
 
-    model = _load_embedding_model()
-    embeddings = model.encode(texts, convert_to_numpy=True).tolist()
-    _, collection = _get_collection()
-    collection.add(documents=texts, metadatas=metadatas, embeddings=embeddings, ids=ids)
-    clear_cache()
-    return chunks
+        model = _load_embedding_model()
+        embeddings = model.encode(texts, convert_to_numpy=True).tolist()
+        _, collection = _get_collection()
+        collection.delete(where={"source_doc": document["source_doc"]})
+        collection.upsert(documents=texts, metadatas=metadatas, embeddings=embeddings, ids=ids)
+        clear_cache()
+        return chunks

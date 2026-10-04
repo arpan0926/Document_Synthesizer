@@ -6,26 +6,40 @@ import pytest
 from fpdf import FPDF
 
 import generation
+import pdf_parser
 import retrieval
 import vector_store
 
 
 class DummyEmbeddingModel:
-    def encode(self, texts: List[str], convert_to_numpy: bool = False) -> List[List[float]]:
-        return [[float(len(text))] for text in texts]
+    def encode(self, texts: str | List[str], convert_to_numpy: bool = False) -> Any:
+        import numpy as np
+        if isinstance(texts, str):
+            arr = [float(len(texts))] + [0.0] * 383
+            return np.array(arr) if convert_to_numpy else arr
+        arr = [[float(len(text))] + [0.0] * 383 for text in texts]
+        return np.array(arr) if convert_to_numpy else arr
 
 
-class DummyCrossEncoder:
-    def predict(self, pairs: List[tuple[str, str]]) -> List[float]:
-        scores: List[float] = []
-        for query, chunk in pairs:
-            if "92 percent" in chunk.lower() or "92%" in chunk.lower():
-                scores.append(0.99)
-            elif "accuracy" in chunk.lower() and "experiment" in query.lower():
-                scores.append(0.8)
-            else:
-                scores.append(0.1)
-        return scores
+class DummyFlashRankRanker:
+    def rerank(self, rerank_req: Any) -> List[Dict[str, Any]]:
+        passages = rerank_req.passages
+        scored = []
+        for p in passages:
+            text = p["text"]
+            score = 0.1
+            if "92 percent" in text.lower() or "92%" in text.lower():
+                score = 0.99
+            elif "accuracy" in text.lower() and "experiment" in rerank_req.query.lower():
+                score = 0.8
+            scored.append({
+                "id": p["id"],
+                "text": text,
+                "meta": p["meta"],
+                "score": score
+            })
+        scored.sort(key=lambda x: x["score"], reverse=True)
+        return scored
 
 
 @pytest.fixture(autouse=True)
@@ -34,9 +48,10 @@ def use_temp_chroma(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(vector_store, "_PERSIST_DIRECTORY", tmp_path / "chroma_db")
     monkeypatch.setattr(vector_store, "_COLLECTION_NAME", f"test_collection_{os.urandom(4).hex()}")
     monkeypatch.setattr(vector_store, "_EMBEDDING_MODEL", None)
-    monkeypatch.setattr(retrieval, "_CROSS_ENCODER", None)
+    monkeypatch.setattr(retrieval, "_FLASHRANK_RANKER", None)
     monkeypatch.setattr(vector_store, "_load_embedding_model", lambda: DummyEmbeddingModel())
-    monkeypatch.setattr(retrieval, "_load_cross_encoder", lambda: DummyCrossEncoder())
+    monkeypatch.setattr(retrieval, "_load_embedding_model", lambda: DummyEmbeddingModel())
+    monkeypatch.setattr(retrieval, "_load_flashrank_reranker", lambda: DummyFlashRankRanker())
 
 
 def create_test_pdf(pdf_path: Path) -> None:
@@ -71,16 +86,42 @@ def test_ingest_retrieve_pipeline(tmp_path: Path) -> None:
     assert top["metadata"]["page_number"] == 1
 
 
+def test_reingestion_replaces_existing_document(tmp_path: Path) -> None:
+    pdf_path = tmp_path / "test_doc.pdf"
+    create_test_pdf(pdf_path)
+
+    first_chunks = vector_store.ingest_document(pdf_path)
+    second_chunks = vector_store.ingest_document(pdf_path)
+    _, collection = vector_store._get_collection()
+
+    assert len(first_chunks) == len(second_chunks)
+    assert collection.count() == len(second_chunks)
+
+
+def test_empty_index_returns_no_results() -> None:
+    assert retrieval.retrieve("anything", top_k=3, rerank=False) == []
+
+
+def test_retrieve_rejects_invalid_query() -> None:
+    with pytest.raises(ValueError, match="non-empty"):
+        retrieval.retrieve("", top_k=3, rerank=False)
+
+
+def test_parse_missing_pdf_reports_failure(tmp_path: Path) -> None:
+    with pytest.raises(RuntimeError, match="Unable to read PDF"):
+        pdf_parser.parse_document(tmp_path / "missing.pdf")
+
+
 def test_answer_query_end_to_end(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     pdf_path = tmp_path / "test_doc.pdf"
     create_test_pdf(pdf_path)
 
     vector_store.ingest_document(pdf_path)
 
-    def fake_call_huggingface(prompt: str) -> str:
+    def fake_call_ollama(prompt: str) -> str:
         return "The model reports 92 percent accuracy [test_doc.pdf, 1]."
 
-    monkeypatch.setattr(generation, "_call_huggingface", fake_call_huggingface)
+    monkeypatch.setattr(generation, "_call_ollama", fake_call_ollama)
 
     result = generation.answer_query("What accuracy did the experiment achieve?")
 
@@ -89,3 +130,17 @@ def test_answer_query_end_to_end(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     assert result["citations"] == [{"source_doc": "test_doc.pdf", "page_number": 1}]
     assert result["verification"]["valid"] == [{"source_doc": "test_doc.pdf", "page_number": 1}]
     assert result["verification"]["flagged"] == []
+
+
+def test_ollama_malformed_response_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    class MalformedResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> Dict[str, Any]:
+            return {"unexpected": "payload"}
+
+    monkeypatch.setattr(generation.requests, "post", lambda *args, **kwargs: MalformedResponse())
+
+    with pytest.raises(RuntimeError, match="non-empty 'response'"):
+        generation._call_ollama("test")

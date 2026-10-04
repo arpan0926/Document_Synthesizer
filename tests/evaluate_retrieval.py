@@ -138,6 +138,8 @@ def evaluate(eval_set: List[Dict[str, Any]]):
 
 
 def main(argv: List[str] | None = None) -> int:
+    import sys
+    sys.stdout.reconfigure(encoding='utf-8')
     parser = argparse.ArgumentParser(description="Evaluate retrieval reranking vs. raw retrieval")
     parser.add_argument("--eval-file", required=True, help="Path to eval_set.json")
     parser.add_argument(
