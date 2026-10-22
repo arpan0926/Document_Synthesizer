@@ -2,7 +2,7 @@ import unittest
 
 from langchain_core.documents import Document
 
-from generation import build_answer_prompt
+from generation import _build_prompt, build_answer_prompt
 from retrieval import to_langchain_documents
 
 
@@ -36,6 +36,21 @@ class LangChainPipelineTests(unittest.TestCase):
 
         self.assertIn("What is the summary?", rendered)
         self.assertIn("Relevant context from the PDF.", rendered)
+
+    def test_build_prompt_uses_document_page_citation_format(self) -> None:
+        chunks = [
+            {
+                "content": "Evidence from the source.",
+                "metadata": {"source_doc": "paper.pdf", "page_number": 7},
+            }
+        ]
+
+        rendered = _build_prompt("What happened?", chunks)
+
+        self.assertIn("[filename.pdf, page_number]", rendered)
+        self.assertIn("Source document: paper.pdf", rendered)
+        self.assertIn("Page: 7", rendered)
+        self.assertNotIn("[1] Source:", rendered)
 
 
 if __name__ == "__main__":

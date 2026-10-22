@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from threading import RLock
 from typing import Any, Dict, List, Tuple
@@ -14,6 +15,7 @@ _EMBEDDING_MODEL = None
 _BM25_INDEX = None
 _ALL_DOCS_CACHE = None
 _STATE_LOCK = RLock()
+logger = logging.getLogger(__name__)
 
 
 def _sanitize_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
@@ -150,7 +152,23 @@ def ingest_document(pdf_path: str | Path) -> List[Dict[str, Any]]:
         model = _load_embedding_model()
         embeddings = model.encode(texts, convert_to_numpy=True).tolist()
         _, collection = _get_collection()
-        collection.delete(where={"source_doc": document["source_doc"]})
+
+        existing = collection.get(where={"source_doc": document["source_doc"]})
+        existing_ids = set(existing.get("ids", []))
         collection.upsert(documents=texts, metadatas=metadatas, embeddings=embeddings, ids=ids)
+        stale_ids = existing_ids.difference(ids)
+        if stale_ids:
+            try:
+                collection.delete(ids=list(stale_ids))
+            except Exception as exc:
+                logger.exception(
+                    "Updated '%s' but failed to remove %d stale chunks",
+                    document["source_doc"],
+                    len(stale_ids),
+                )
+                clear_cache()
+                raise RuntimeError(
+                    f"Document '{document['source_doc']}' was updated, but stale chunks could not be removed"
+                ) from exc
         clear_cache()
         return chunks

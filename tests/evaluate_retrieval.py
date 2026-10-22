@@ -34,11 +34,9 @@ def percentile_ms(values_ms: List[float], pct: float) -> float:
     return s[k]
 
 
-def evaluate(eval_set: List[Dict[str, Any]]):
+def evaluate(eval_set: List[Dict[str, Any]], candidate_k: int = 40):
     modes = [("reranked", True), ("raw", False)]
     results: Dict[str, Any] = {m[0]: {"per_query": [], "latencies_ms": []} for m in modes}
-    # candidate_k controls how many candidates are fetched from ChromaDB
-    candidate_k = globals().get("CANDIDATE_K", 10)
 
     for mode_name, rerank_flag in modes:
         for item in eval_set:
@@ -47,7 +45,7 @@ def evaluate(eval_set: List[Dict[str, Any]]):
             expected_page = item.get("expected_page")
 
             start = time.perf_counter()
-            hits = retrieval.retrieve(query, top_k=candidate_k, rerank=rerank_flag)
+            hits = retrieval.retrieve(query, candidate_k=candidate_k, rerank=rerank_flag)
             elapsed_ms = (time.perf_counter() - start) * 1000.0
 
             top3 = hits[:3]
@@ -145,7 +143,7 @@ def main(argv: List[str] | None = None) -> int:
     parser.add_argument(
         "--candidate-k",
         type=int,
-        default=10,
+        default=40,
         help="Number of candidate chunks to retrieve from the vector store before reranking",
     )
     args = parser.parse_args(argv)
@@ -153,11 +151,10 @@ def main(argv: List[str] | None = None) -> int:
     with open(args.eval_file, "r", encoding="utf-8") as fh:
         eval_set = json.load(fh)
 
-    # Pass candidate_k into evaluate via a closure-like global var
-    global CANDIDATE_K
-    CANDIDATE_K = args.candidate_k
+    if args.candidate_k < 1:
+        parser.error("--candidate-k must be a positive integer")
 
-    evaluate(eval_set)
+    evaluate(eval_set, candidate_k=args.candidate_k)
     return 0
 
 

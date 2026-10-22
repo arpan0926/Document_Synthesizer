@@ -1,123 +1,89 @@
 # Document Synthesizer
 
-A retrieval-augmented generation (RAG) pipeline for question-answering over collections of complex, multi-page PDF documents (research papers, reports) with tables and mixed content. Built around a two-stage retrieval architecture (dense vector search + cross-encoder reranking) and citation verification to reduce hallucinated source attribution.
+A local retrieval-augmented generation pipeline for question-answering over PDF collections. It extracts page text and tables, indexes chunks in ChromaDB, combines dense retrieval with BM25 using reciprocal-rank fusion, reranks candidates with FlashRank, and generates cited answers using a locally hosted Ollama model.
 
-## What it does
+## Requirements and setup
 
-Given a folder of PDFs, the system:
-1. Parses each document into per-page text and extracts tables separately.
-2. Chunks text into small, embedding-friendly units while preserving full-page context for downstream use.
-3. Embeds and stores chunks in a persistent ChromaDB vector store.
-4. On a query, retrieves candidate chunks via dense vector search, reranks them with a cross-encoder, and generates an answer that must cite `[source_doc, page_number]` for every claim.
-5. Verifies each generated citation against the actually-retrieved chunks and flags any that don't match, to surface potential hallucinations.
+- Python 3.10 or newer
+- Ollama running locally, with the configured model downloaded
+- The project dependencies from `requirements.txt`
 
-## Architecture
-
-```
-PDF files
-   │
-   ▼
-pdf_parser.py    → extracts per-page text (pdfplumber) + tables (camelot, lattice/stream)
-   │
-   ▼
-chunking.py      → splits page text into ~256-token paragraph-aligned chunks with overlap;
-                    attaches full-page text as parent_context metadata (small-to-big retrieval);
-                    tables are kept as a single markdown-serialized chunk
-   │
-   ▼
-vector_store.py  → embeds chunks (BAAI/bge-small-en-v1.5) and stores in ChromaDB
-   │
-   ▼
-retrieval.py     → stage 1: dense vector search (top 10 by embedding distance)
-                    stage 2: cross-encoder reranking (ms-marco-MiniLM-L-6-v2) → top 3
-   │
-   ▼
-generation.py    → builds a grounded prompt, calls an LLM (Hugging Face Inference API),
-                    extracts [source, page] citations from the answer, and verifies
-                    each one against the retrieved chunk metadata
-   │
-   ▼
-main.py          → CLI: ingest a folder of PDFs, run a single query, or an interactive loop
+```bash
+python -m venv .venv
+# Activate the environment for your shell, then:
+python -m pip install -r requirements.txt
+ollama pull qwen2.5:7b-instruct
 ```
 
-### Design decisions worth calling out
+Optional environment variables:
 
-- **Small-to-big chunking**: chunks used for embedding/matching are small (~256 tokens) for precision, but each chunk carries its full source page as `parent_context`, so a generation step can expand context without re-retrieving.
-- **Two-stage retrieval**: vector search is cheap but imprecise; a cross-encoder reranker over (query, chunk) pairs is expensive but more accurate. Both are implemented so the trade-off is measurable (see Evaluation below) rather than assumed.
-- **Citation verification**: the model is instructed to cite `[source_doc, page_number]` for every claim. `verify_citations()` checks each citation against the metadata of chunks that were actually retrieved, separating `valid` from `flagged` citations — a lightweight, deterministic guard against citation hallucination.
-- **Table handling**: tables are extracted independently of text (via `camelot`) and stored as their own chunks, serialized to markdown for embedding while keeping the original DataFrame in metadata for potential structured use later.
-
-## Evaluation
-
-An evaluation harness (`eval_set.json` → `eval_results.json`) tests retrieval against 30 hand-written queries spanning 4 arXiv papers, checking whether the expected `(source_doc, page_number)` appears in the top-3 retrieved chunks.
-
-| Metric | Vector search only | + Cross-encoder reranking |
+| Variable | Default | Purpose |
 |---|---|---|
-| Recall@3 | 33.3% | 40.0% |
-| MRR | 0.300 | 0.306 |
-| Mean latency | ~18 ms | ~756 ms |
-| P95 latency | ~23 ms | ~804 ms |
+| `OLLAMA_URL` | `http://localhost:11434` | Ollama server base URL |
+| `OLLAMA_MODEL` | `qwen2.5:7b-instruct` | Model used for answer generation |
+| `OLLAMA_TIMEOUT_SECONDS` | `120` | Inference request timeout |
 
-**Takeaways:**
-- Reranking gives a modest recall improvement (~7 points absolute) at roughly a **40x latency cost**, which is a real trade-off to weigh depending on the target use case (interactive vs. batch).
-- Misses are frequently "near misses" — the correct source document is retrieved, but the specific page is off, suggesting chunk-boundary effects and single-page ground truth may both be contributing factors. This is an active area for improvement (see below).
+## CLI
 
-Re-run the evaluation with:
-```bash
-python eval.py
-```
+Ingest PDFs from a folder:
 
-## Known limitations / next steps
-
-- Recall@3 (~40%) has clear room to improve — candidate fixes: a larger embedding model than `bge-small`, hybrid dense+BM25 retrieval (a sparse document index already exists in `vector_store.py` but isn't wired into `retrieval.py` yet), and chunk-size/overlap tuning.
-- PDF parsing failures are currently swallowed silently (broad `except: pass`); this should be replaced with logging so ingestion failures are visible.
-- Text and table retrieval aren't currently weighted differently, so a table-relevant query can be crowded out by text chunks or vice versa.
-- The Hugging Face Inference API is used for generation; response quality and availability depend on the configured model and API rate limits.
-
-## Setup
-
-```bash
-pip install -r requirements.txt
-```
-
-Create a `.env` file in the project root (this file is git-ignored and should never be committed):
-```
-HF_API_TOKEN=your_huggingface_token
-HF_MODEL=meta-llama/Llama-3.1-8B-Instruct   # optional override
-```
-
-## Usage
-
-Ingest a folder of PDFs:
 ```bash
 python main.py --ingest-folder ./data
 ```
 
-Run a single query:
-```bash
-python main.py --query "What is the RECAST framework and what does it do?"
-```
+Ask a single question or start the interactive loop:
 
-Or start an interactive session:
 ```bash
+python main.py --query "What is the RECAST framework?"
 python main.py
 ```
 
-## Project structure
+## HTTP API
 
-```
-├── main.py           # CLI entry point (ingest / query / interactive loop)
-├── pdf_parser.py      # PDF → page text + tables
-├── chunking.py        # Text/table chunking with parent-page context
-├── vector_store.py    # Embedding + ChromaDB persistence
-├── retrieval.py        # Dense retrieval + cross-encoder reranking
-├── generation.py       # Prompting, LLM calls, citation extraction/verification
-├── eval_set.json       # 30 evaluation queries with expected (doc, page)
-├── eval_results.json   # Recall@3 / MRR / latency results
-├── data/                # Source PDFs (not committed)
-└── chroma_db/           # Persisted vector store (not committed)
+Start the FastAPI service:
+
+```bash
+python app.py
+# Or run Uvicorn directly:
+uvicorn app:app --host 127.0.0.1 --port 8000
 ```
 
-## Tech stack
+Open `http://127.0.0.1:8000/` for the chat interface or `/docs` for the API explorer.
 
-Python · ChromaDB · Sentence-Transformers (`bge-small-en-v1.5`) · Cross-Encoder (`ms-marco-MiniLM-L-6-v2`) · pdfplumber · camelot · LangChain (prompting) · Hugging Face Inference API
+- `GET /health` reports vector-store availability and indexed chunk count.
+- `POST /ingest` accepts a PDF as multipart field `file`; uploads are limited to 50 MB.
+- `POST /query` accepts JSON with `query`, optional `candidate_k` (default 40), and optional `result_k` (default 3).
+
+The API has no authentication. Keep it on a trusted interface or add an authentication layer before exposing it to an untrusted network.
+
+## Retrieval evaluation
+
+Run the evaluator with a verified dataset and the same candidate pool used by the query path:
+
+```bash
+python tests/evaluate_retrieval.py --eval-file eval_set.json --candidate-k 40
+```
+
+The current `eval_set.json` contains 14 queries (not 10) across the four PDFs. Each expected page was checked against the local PDF's extracted text and uses the physical, 1-based page numbering stored by the parser. One run with `candidate_k=40` produced:
+
+| Metric | Dense + BM25, no reranking | Dense + BM25 + FlashRank |
+|---|---:|---:|
+| Recall@3 (source and page) | 50.0% | 64.3% |
+| MRR | 0.333 | 0.500 |
+| Mean latency | 78 ms | 20,939 ms |
+| P95 latency | 363 ms | 93,408 ms |
+
+These are a single run on the current machine and index, not a general performance guarantee. The first reranked query took 93.4 seconds; the remaining 13 averaged 15.36 seconds. Reranking latency therefore includes a substantial cold-start cost, but remained high on subsequent queries too. Re-measure after model warm-up and on the intended deployment hardware before making a production latency decision. The result file is `eval_results.json`.
+
+## Tests
+
+```bash
+python -m pytest
+```
+
+## Limitations
+
+- Ollama, the embedding model, and FlashRank model must be available to the runtime; model loading can require network access on first use.
+- Citation verification confirms that a cited document/page was retrieved, not that the cited passage entails the associated claim.
+- Scanned PDFs without a text layer may produce little or no useful extracted text.
+- The API currently runs ingestion and inference in-process; it has no authentication, durable job queue, or multi-worker coordination.

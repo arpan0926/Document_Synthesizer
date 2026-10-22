@@ -56,7 +56,14 @@ def _reciprocal_rank_fusion(
     return [doc_map[doc_id] for doc_id, _ in sorted_docs]
 
 
-def retrieve(query: str, top_k: int = 40, rerank: bool = True) -> List[Dict[str, Any]]:
+def retrieve(
+    query: str,
+    top_k: int = 40,
+    rerank: bool = True,
+    *,
+    candidate_k: int | None = None,
+    result_k: int = 3,
+) -> List[Dict[str, Any]]:
     """Two-stage retrieval pipeline:
     1. Expanded Dense Vector Search (candidate_k = 40) + Sparse BM25 Search.
     2. Reciprocal Rank Fusion (RRF).
@@ -64,8 +71,11 @@ def retrieve(query: str, top_k: int = 40, rerank: bool = True) -> List[Dict[str,
     """
     if not isinstance(query, str) or not query.strip():
         raise ValueError("query must be a non-empty string")
-    if not isinstance(top_k, int) or isinstance(top_k, bool) or top_k < 1:
-        raise ValueError("top_k must be a positive integer")
+    candidate_count = top_k if candidate_k is None else candidate_k
+    if not isinstance(candidate_count, int) or isinstance(candidate_count, bool) or candidate_count < 1:
+        raise ValueError("candidate_k must be a positive integer")
+    if not isinstance(result_k, int) or isinstance(result_k, bool) or result_k < 1:
+        raise ValueError("result_k must be a positive integer")
 
     _, collection = _get_collection()
     if collection.count() == 0:
@@ -77,7 +87,7 @@ def retrieve(query: str, top_k: int = 40, rerank: bool = True) -> List[Dict[str,
     query_embedding = model.encode(query, convert_to_numpy=True).tolist()
     results = collection.query(
         query_embeddings=[query_embedding],
-        n_results=top_k,
+        n_results=candidate_count,
         include=["documents", "metadatas", "distances"],
     )
 
@@ -108,7 +118,7 @@ def retrieve(query: str, top_k: int = 40, rerank: bool = True) -> List[Dict[str,
 
             top_bm25_indices = sorted(
                 range(len(bm25_scores)), key=lambda i: bm25_scores[i], reverse=True
-            )[:top_k]
+            )[:candidate_count]
             bm25_candidates = [
                 {
                     "id": all_docs[idx]["id"],
@@ -133,7 +143,7 @@ def retrieve(query: str, top_k: int = 40, rerank: bool = True) -> List[Dict[str,
         return []
 
     if not rerank:
-        return fused_candidates[:top_k]
+        return fused_candidates[:candidate_count]
 
     # 4. Stage-2 Fast Reranking via FlashRank
     try:
@@ -157,7 +167,7 @@ def retrieve(query: str, top_k: int = 40, rerank: bool = True) -> List[Dict[str,
             for item in reranked_raw
         ]
         scored.sort(key=lambda item: item["rerank_score"], reverse=True)
-        return scored[:3]
+        return scored[:result_k]
     except ImportError as exc:
         raise RuntimeError("Install flashrank to enable reranking") from exc
     except (RuntimeError, TypeError, ValueError, KeyError) as exc:

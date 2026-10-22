@@ -4,7 +4,9 @@ from typing import Any, Dict, List
 
 import pytest
 from fpdf import FPDF
+from fastapi.testclient import TestClient
 
+import app as api
 import generation
 import pdf_parser
 import retrieval
@@ -130,6 +132,39 @@ def test_answer_query_end_to_end(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     assert result["citations"] == [{"source_doc": "test_doc.pdf", "page_number": 1}]
     assert result["verification"]["valid"] == [{"source_doc": "test_doc.pdf", "page_number": 1}]
     assert result["verification"]["flagged"] == []
+
+
+def test_answer_query_separates_candidate_and_result_counts(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: Dict[str, Any] = {}
+
+    def fake_retrieve(query: str, **kwargs: Any) -> List[Dict[str, Any]]:
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr(generation, "retrieve", fake_retrieve)
+    monkeypatch.setattr(generation, "_call_ollama", lambda prompt: "No answer available.")
+
+    generation.answer_query("test", candidate_k=25, result_k=5)
+
+    assert captured == {"candidate_k": 25, "result_k": 5}
+
+
+def test_query_api_validates_and_forwards_counts(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: Dict[str, Any] = {}
+
+    def fake_answer_query(query: str, **kwargs: Any) -> Dict[str, Any]:
+        captured.update(kwargs)
+        return {"answer": "ok", "context_chunks": [], "citations": [], "verification": {"valid": [], "flagged": []}}
+
+    monkeypatch.setattr(api, "answer_query", fake_answer_query)
+    client = TestClient(api.app)
+
+    response = client.post("/query", json={"query": "test", "candidate_k": 25, "result_k": 5})
+
+    assert response.status_code == 200
+    assert captured == {"candidate_k": 25, "result_k": 5}
+    assert client.post("/query", json={"query": ""}).status_code == 422
+    assert client.post("/query", json={"query": "   "}).status_code == 422
 
 
 def test_ollama_malformed_response_raises(monkeypatch: pytest.MonkeyPatch) -> None:

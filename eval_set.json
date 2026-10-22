@@ -1,12 +1,86 @@
 [
   {
-    "query": "What accuracy did the model achieve on the test set?",
+    "query": "What time-averaged relative error reduction does RECAST achieve compared to the uncorrected coarse-grid solver?",
     "expected_source_doc": "2608.11572v1.pdf",
-    "expected_page": 4
+    "expected_page": 1,
+    "_verified_fact": "Abstract/Conclusion state RECAST reduces time-averaged relative error by approximately 50-92% compared with the uncorrected coarse-grid solver."
   },
   {
-    "query": "Which optimizer was used in experiment B?",
+    "query": "What optimizer was used to train SHRED-SR?",
     "expected_source_doc": "2608.11572v1.pdf",
-    "expected_page": 2
+    "expected_page": 9,
+    "_verified_fact": "Section 2.6: 'Training uses the Adam optimizer [30] with starting learning rate 10^-3, weight decay of 10^-5, batch size of 256.'"
+  },
+  {
+    "query": "How many PDE test cases does RECAST evaluate on?",
+    "expected_source_doc": "2608.11572v1.pdf",
+    "expected_page": 1,
+    "_verified_fact": "The method is demonstrated on six one-dimensional PDE test cases (advection-diffusion, KdV-Burgers, dielectric wave, FitzHugh-Nagumo, Schrodinger, shallow-water)."
+  },
+  {
+    "query": "What spatial coarsening factors were used to evaluate RECAST?",
+    "expected_source_doc": "2608.11572v1.pdf",
+    "expected_page": 1,
+    "_verified_fact": "Abstract: 'spatial grids coarsened by factors of 8-16 and 1000-step closed-loop rollouts from unseen initial conditions.'"
+  },
+  {
+    "query": "What accuracy did the proposed Deep Q-Network achieve on the test set?",
+    "expected_source_doc": "2608.12190v1.pdf",
+    "expected_page": 9,
+    "_verified_fact": "Table 1: Proposed Deep Q-Network (RL) achieves 99.72% accuracy, 99.68% precision, 99.65% recall."
+  },
+  {
+    "query": "What is the false positive rate of the proposed DQN cyber defense model?",
+    "expected_source_doc": "2608.12190v1.pdf",
+    "expected_page": 9,
+    "_verified_fact": "FPR of 0.31% reported in Table 1, lowest among all compared models."
+  },
+  {
+    "query": "Which two datasets were used to train and validate the DQN cyber defense framework?",
+    "expected_source_doc": "2608.12190v1.pdf",
+    "expected_page": 1,
+    "_verified_fact": "CICIDS2017 dataset for model creation/training, UNSW-NB15 dataset for external validation."
+  },
+  {
+    "query": "What detection latency did the proposed Deep Q-Network achieve?",
+    "expected_source_doc": "2608.12190v1.pdf",
+    "expected_page": 9,
+    "_verified_fact": "Table 1 / Reinforcement Learning Performance Metrics: Average Decision Time of 15 ms, lowest detection latency among compared models."
+  },
+  {
+    "query": "What test accuracy did the Random Forest model trained on Grad-CAM-derived features achieve across 17 malware families?",
+    "expected_source_doc": "2608.12077v1.pdf",
+    "expected_page": 22,
+    "_verified_fact": "Abstract/Table 9: Random Forest on 4096-dimensional combined embeddings achieves 0.777 accuracy, exceeding the prior 0.750 benchmark."
+  },
+  {
+    "query": "Which image transformation yielded the strongest CNN classification accuracy for malware family classification?",
+    "expected_source_doc": "2608.12077v1.pdf",
+    "expected_page": 15,
+    "_verified_fact": "Table 1: Entropy Hilbert curve images yield the strongest CNN accuracy (0.688) among the eight transformations tested."
+  },
+  {
+    "query": "How many malware families and samples per family were used in the Grad-CAM malware classification study?",
+    "expected_source_doc": "2608.12077v1.pdf",
+    "expected_page": 5,
+    "_verified_fact": "17 malware families, 1,000 samples selected from each, for a dataset of 17,000 samples total."
+  },
+  {
+    "query": "What position ADE does the learned behavior planner achieve over the 8-second horizon on the DrivIng validation set?",
+    "expected_source_doc": "2608.12198v1.pdf",
+    "expected_page": 10,
+    "_verified_fact": "Section 5.1/Table 1: position ADE is 1.83m, velocity ADE 0.56 m/s, heading ADE 2.6 degrees over 8s horizon."
+  },
+  {
+    "query": "At what frequency did the behavior planning module generate trajectory predictions during real-vehicle integration on karl.?",
+    "expected_source_doc": "2608.12198v1.pdf",
+    "expected_page": 13,
+    "_verified_fact": "Section 5.2: behavior planning module generated trajectory predictions at a frequency of 10 Hz during test runs."
+  },
+  {
+    "query": "What vehicle dynamics model is used in the trajectory supervision module's optimal control problem?",
+    "expected_source_doc": "2608.12198v1.pdf",
+    "expected_page": 4,
+    "_verified_fact": "Trajectory Supervision section: 'a kinematic single-track model is used' to ensure general drivability."
   }
 ]

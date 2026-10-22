@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#162720">
+  <title>Document Synthesizer</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #17251f;
+      --muted: #69766e;
+      --paper: #f3f4ed;
+      --surface: #fffefa;
+      --line: #dfe4d9;
+      --forest: #183a2e;
+      --mint: #d8f08b;
+      --orange: #ee8157;
+      --shadow: 0 18px 48px rgba(27, 44, 34, .08);
+      font-family: "Aptos", "Segoe UI", sans-serif;
+      font-synthesis: none;
+      text-rendering: optimizeLegibility;
+    }
+
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 320px; min-height: 100vh; color: var(--ink); background: var(--paper); }
+    button, textarea, select { font: inherit; }
+    button { cursor: pointer; }
+    .shell { min-height: 100vh; display: grid; grid-template-columns: 254px minmax(0, 1fr); }
+    .rail { display: flex; flex-direction: column; min-height: 100vh; padding: 25px 19px 18px; color: #f3f6ef; background: var(--forest); }
+    .brand { display: flex; gap: 12px; align-items: center; padding: 0 4px 27px; border-bottom: 1px solid rgba(255,255,255,.14); }
+    .brand-mark { display: grid; width: 36px; height: 36px; place-items: center; border-radius: 11px; color: var(--forest); background: var(--mint); font: 700 18px Georgia, serif; }
+    .brand-name { font: 600 17px Georgia, serif; letter-spacing: 0; }
+    .rail-label { margin: 26px 7px 10px; color: #a9b9ae; font: 600 10px "Aptos", "Segoe UI", sans-serif; letter-spacing: 1.1px; text-transform: uppercase; }
+    .rail-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 11px 10px; border: 0; border-radius: 7px; color: #edf2eb; background: transparent; text-align: left; }
+    .rail-item.active { color: var(--ink); background: var(--mint); }
+    .rail-icon { width: 21px; text-align: center; font-size: 17px; }
+    .library-note { margin: 12px 8px; color: #b6c4b8; font-size: 12px; line-height: 1.6; }
+    .rail-bottom { margin-top: auto; padding: 15px 8px 2px; border-top: 1px solid rgba(255,255,255,.14); }
+    .health { display: flex; align-items: center; gap: 8px; color: #dfe8df; font-size: 12px; }
+    .health-dot { width: 8px; height: 8px; border-radius: 50%; background: #a9b9ae; }
+    .health-dot.good { background: #bfe875; box-shadow: 0 0 0 3px rgba(191,232,117,.15); }
+    .health-dot.bad { background: var(--orange); }
+    .count { margin-top: 9px; color: #a9b9ae; font-size: 11px; }
+
+    .main { display: flex; flex-direction: column; min-width: 0; min-height: 100vh; }
+    .topbar { display: flex; align-items: center; justify-content: space-between; min-height: 70px; padding: 0 34px; border-bottom: 1px solid var(--line); background: rgba(255,254,250,.72); }
+    .crumb { color: var(--muted); font-size: 12px; }
+    .crumb strong { color: var(--ink); font-weight: 600; }
+    .top-actions { display: flex; align-items: center; gap: 10px; }
+    .quiet-button { display: inline-flex; align-items: center; gap: 8px; min-height: 37px; padding: 0 12px; border: 1px solid var(--line); border-radius: 6px; color: var(--ink); background: var(--surface); font-size: 12px; }
+    .quiet-button:hover { border-color: #a8b4a6; }
+    .chat { display: flex; flex: 1; flex-direction: column; width: min(100%, 1050px); margin: 0 auto; padding: 0 42px; }
+    .scroll-area { flex: 1; padding: 35px 0 25px; }
+    .welcome { padding: 44px 0 30px; animation: arrive .45s ease both; }
+    .eyebrow { display: flex; align-items: center; gap: 9px; color: #637567; font-size: 11px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; }
+    .eyebrow::before { width: 23px; height: 2px; background: var(--orange); content: ""; }
+    h1 { max-width: 690px; margin: 18px 0 13px; font: 400 clamp(34px, 4vw, 52px)/1.08 Georgia, "Times New Roman", serif; letter-spacing: 0; }
+    .welcome-copy { max-width: 550px; margin: 0; color: var(--muted); font-size: 15px; line-height: 1.65; }
+    .suggestions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 30px; }
+    .suggestion { min-height: 83px; padding: 13px 14px; border: 1px solid var(--line); border-radius: 7px; color: var(--ink); background: rgba(255,254,250,.72); text-align: left; line-height: 1.4; transition: border-color .15s, transform .15s, background .15s; }
+    .suggestion:hover { transform: translateY(-2px); border-color: #aab9a1; background: white; }
+    .suggestion span { display: block; margin-bottom: 8px; color: #778779; font-size: 10px; font-weight: 700; letter-spacing: .7px; text-transform: uppercase; }
+    .messages { display: flex; flex-direction: column; gap: 25px; }
+    .message { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 13px; max-width: 850px; animation: arrive .25s ease both; }
+    .avatar { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 9px; color: var(--forest); background: #e1edc9; font: 700 14px Georgia, serif; }
+    .message.user .avatar { color: #68442f; background: #f4dfd3; }
+    .message-head { display: flex; align-items: baseline; gap: 10px; margin: 2px 0 7px; }
+    .message-name { font-size: 12px; font-weight: 700; }
+    .message-time { color: #8a958c; font-size: 10px; }
+    .message-body { color: #334139; font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; white-space: pre-wrap; }
+    .message.user .message-body { color: #39433d; }
+    .answer-meta { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 13px; }
+    .pill { display: inline-flex; align-items: center; min-height: 24px; padding: 0 9px; border: 1px solid #dce5d5; border-radius: 999px; color: #466047; background: #f4f8ed; font-size: 10px; }
+    .pill.flagged { border-color: #f0c7b8; color: #974b32; background: #fff4ef; }
+    details.sources { margin-top: 13px; border-top: 1px solid var(--line); }
+    details.sources summary { width: fit-content; padding: 10px 0 4px; color: #526c59; cursor: pointer; font-size: 11px; font-weight: 600; }
+    .source { margin-top: 9px; padding: 10px 12px; border-left: 2px solid #bfd789; background: rgba(255,254,250,.78); }
+    .source-title { color: #49624e; font-size: 10px; font-weight: 700; }
+    .source-text { margin-top: 5px; color: #59665d; font-size: 11px; line-height: 1.55; white-space: pre-wrap; }
+    .thinking { display: inline-flex; align-items: center; gap: 9px; color: var(--muted); font-size: 13px; }
+    .spinner { width: 14px; height: 14px; border: 2px solid #d7dfd3; border-top-color: #54765a; border-radius: 50%; animation: spin .8s linear infinite; }
+
+    .composer-wrap { position: sticky; bottom: 0; padding: 13px 0 19px; background: linear-gradient(0deg, var(--paper) 78%, rgba(243,244,237,0)); }
+    .composer { padding: 12px; border: 1px solid #d4dbd0; border-radius: 9px; background: var(--surface); box-shadow: var(--shadow); }
+    .composer textarea { display: block; width: 100%; min-height: 51px; max-height: 180px; resize: vertical; padding: 6px 7px; border: 0; outline: 0; color: var(--ink); background: transparent; font-size: 14px; line-height: 1.5; }
+    .composer textarea::placeholder { color: #8b968c; }
+    .composer-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 7px 4px 0; border-top: 1px solid #eef0e9; }
+    .composer-tools { display: flex; align-items: center; gap: 12px; }
+    .upload-label { display: inline-flex; align-items: center; gap: 7px; color: #617368; cursor: pointer; font-size: 11px; }
+    .upload-label:hover { color: var(--forest); }
+    .upload-label input { display: none; }
+    .candidate-select { max-width: 145px; padding: 6px 25px 6px 8px; border: 0; color: #718075; background: transparent; font-size: 10px; }
+    .send-button { display: inline-flex; align-items: center; gap: 8px; min-height: 34px; padding: 0 13px; border: 0; border-radius: 6px; color: #f7f9f3; background: var(--forest); font-size: 12px; font-weight: 600; transition: background .15s, transform .15s; }
+    .send-button:hover { transform: translateY(-1px); background: #285540; }
+    .send-button:disabled { cursor: wait; opacity: .55; }
+    .send-icon { font-size: 15px; }
+    .composer-hint { margin: 9px 4px 0; color: #8a958b; font-size: 10px; text-align: center; }
+    .notice { min-height: 17px; padding: 5px 5px 0; color: #7a5745; font-size: 11px; }
+    .notice:empty { display: none; }
+    @keyframes arrive { from { opacity: 0; transform: translateY(7px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    @media (max-width: 760px) {
+      .shell { grid-template-columns: 1fr; }
+      .rail { display: none; }
+      .topbar { min-height: 58px; padding: 0 17px; }
+      .topbar::before { color: var(--forest); font: 600 15px Georgia, serif; content: "Document Synthesizer"; }
+      .crumb { display: none; }
+      .quiet-button { min-height: 33px; padding: 0 9px; font-size: 11px; }
+      .chat { padding: 0 17px; }
+      .scroll-area { padding-top: 20px; }
+      .welcome { padding: 28px 0 20px; }
+      h1 { font-size: 39px; }
+      .suggestions { grid-template-columns: 1fr; gap: 7px; margin-top: 22px; }
+      .suggestion { min-height: 61px; }
+      .composer-wrap { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+      .composer-tools { gap: 8px; }
+      .candidate-select { max-width: 108px; }
+      .send-button { padding: 0 10px; }
+      .composer-hint { font-size: 9px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="rail">
+      <div class="brand"><div class="brand-mark">D</div><div class="brand-name">Document Synthesizer</div></div>
+      <div class="rail-label">Workspace</div>
+      <button class="rail-item active" type="button"><span class="rail-icon">&#9672;</span>Ask your documents</button>
+      <div class="rail-label">Library</div>
+      <button class="rail-item" id="uploadRail" type="button"><span class="rail-icon">+</span>Add a PDF</button>
+      <p class="library-note">Ask questions across your indexed research papers and reports. Answers include page-level citations.</p>
+      <div class="rail-bottom">
+        <div class="health"><span class="health-dot" id="healthDot"></span><span id="healthText">Checking index...</span></div>
+        <div class="count" id="chunkCount">Connecting to local service</div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="crumb">Workspace <span aria-hidden="true">/</span> <strong>Ask your documents</strong></div>
+        <div class="top-actions">
+          <button class="quiet-button" id="docsButton" type="button" title="Open API documentation">API docs <span aria-hidden="true">&#8599;</span></button>
+        </div>
+      </header>
+
+      <section class="chat" aria-label="Document chat">
+        <div class="scroll-area" id="scrollArea">
+          <section class="welcome" id="welcome">
+            <div class="eyebrow">Research workspace</div>
+            <h1>Find the detail<br>you came for.</h1>
+            <p class="welcome-copy">Ask a question about your indexed PDFs. Answers are grounded in retrieved passages, with source pages shown below each response.</p>
+            <div class="suggestions">
+              <button class="suggestion" type="button" data-query="What are the main findings across these papers?"><span>Explore</span>What are the main findings across these papers?</button>
+              <button class="suggestion" type="button" data-query="Compare the methods used in the papers."><span>Compare</span>Compare the methods used in the papers.</button>
+              <button class="suggestion" type="button" data-query="What evidence supports the key result?"><span>Investigate</span>What evidence supports the key result?</button>
+            </div>
+          </section>
+          <div class="messages" id="messages" aria-live="polite"></div>
+        </div>
+
+        <div class="composer-wrap">
+          <form class="composer" id="queryForm">
+            <textarea id="queryInput" rows="2" maxlength="4000" placeholder="Ask a question about your documents..." aria-label="Your question"></textarea>
+            <div class="composer-footer">
+              <div class="composer-tools">
+                <label class="upload-label" title="Upload a PDF to the index"><span aria-hidden="true">&#43;</span><span>Add PDF</span><input id="pdfInput" type="file" accept="application/pdf,.pdf"></label>
+                <select class="candidate-select" id="candidateSelect" aria-label="Retrieval candidate count" title="More candidates can improve recall but increase reranking time">
+                  <option value="10">10 candidates</option>
+                  <option value="20">20 candidates</option>
+                  <option value="40" selected>40 candidates</option>
+                </select>
+              </div>
+              <button class="send-button" id="sendButton" type="submit"><span>Ask</span><span class="send-icon" aria-hidden="true">&#8593;</span></button>
+            </div>
+            <div class="notice" id="notice" role="status"></div>
+          </form>
+          <div class="composer-hint">Answers can be wrong. Check the cited passages before relying on them.</div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const $ = (selector) => document.querySelector(selector);
+    const form = $("#queryForm");
+    const input = $("#queryInput");
+    const messages = $("#messages");
+    const welcome = $("#welcome");
+    const sendButton = $("#sendButton");
+    const notice = $("#notice");
+    let busy = false;
+
+    function scrollToBottom() {
+      requestAnimationFrame(() => window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" }));
+    }
+
+    function addMessage(role, text) {
+      const article = document.createElement("article");
+      article.className = `message ${role}`;
+      const avatar = document.createElement("div");
+      avatar.className = "avatar";
+      avatar.textContent = role === "user" ? "Y" : "D";
+      const content = document.createElement("div");
+      const head = document.createElement("div");
+      head.className = "message-head";
+      const name = document.createElement("span");
+      name.className = "message-name";
+      name.textContent = role === "user" ? "You" : "Document Synthesizer";
+      const time = document.createElement("span");
+      time.className = "message-time";
+      time.textContent = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      head.append(name, time);
+      const body = document.createElement("div");
+      body.className = "message-body";
+      body.textContent = text;
+      content.append(head, body);
+      article.append(avatar, content);
+      messages.append(article);
+      welcome.hidden = true;
+      scrollToBottom();
+      return { article, content, body };
+    }
+
+    function addSources(message, result) {
+      const verification = result.verification || { valid: [], flagged: [] };
+      const meta = document.createElement("div");
+      meta.className = "answer-meta";
+      const valid = document.createElement("span");
+      valid.className = "pill";
+      valid.textContent = `${(verification.valid || []).length} verified citation(s)`;
+      meta.append(valid);
+      for (const citation of verification.flagged || []) {
+        const flagged = document.createElement("span");
+        flagged.className = "pill flagged";
+        flagged.textContent = `Unmatched: ${citation.source_doc}, p. ${citation.page_number}`;
+        meta.append(flagged);
+      }
+      message.content.append(meta);
+
+      const chunks = result.context_chunks || [];
+      if (!chunks.length) return;
+      const details = document.createElement("details");
+      details.className = "sources";
+      const summary = document.createElement("summary");
+      summary.textContent = `Retrieved passages (${chunks.length})`;
+      details.append(summary);
+      for (const [index, chunk] of chunks.entries()) {
+        const source = document.createElement("div");
+        source.className = "source";
+        const title = document.createElement("div");
+        title.className = "source-title";
+        const metadata = chunk.metadata || {};
+        const score = Number.isFinite(chunk.rerank_score) ? ` | rerank ${chunk.rerank_score.toFixed(3)}` : "";
+        title.textContent = `${index + 1}. ${metadata.source_doc || "Unknown source"}, page ${metadata.page_number ?? "?"}${score}`;
+        const passage = document.createElement("div");
+        passage.className = "source-text";
+        passage.textContent = chunk.content || "";
+        source.append(title, passage);
+        details.append(source);
+      }
+      message.content.append(details);
+      scrollToBottom();
+    }
+
+    function setBusy(value) {
+      busy = value;
+      sendButton.disabled = value;
+      sendButton.querySelector("span").textContent = value ? "Working" : "Ask";
+      input.disabled = value;
+    }
+
+    async function ask(query) {
+      const text = query.trim();
+      if (!text || busy) return;
+      notice.textContent = "";
+      addMessage("user", text);
+      input.value = "";
+      const pending = addMessage("assistant", "");
+      const thinking = document.createElement("div");
+      thinking.className = "thinking";
+      const spinner = document.createElement("span");
+      spinner.className = "spinner";
+      const label = document.createElement("span");
+      label.textContent = "Searching passages and preparing an answer...";
+      thinking.append(spinner, label);
+      pending.body.append(thinking);
+      setBusy(true);
+
+      try {
+        const response = await fetch("/query", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query: text, candidate_k: Number($("#candidateSelect").value), result_k: 3 })
+        });
+        const result = await response.json();
+        if (!response.ok) {
+          const message = result?.error?.message || result?.detail || "The query could not be completed.";
+          throw new Error(typeof message === "string" ? message : JSON.stringify(message));
+        }
+        pending.body.replaceChildren();
+        pending.body.textContent = result.answer || "No answer was returned.";
+        addSources(pending, result);
+      } catch (error) {
+        pending.body.textContent = `Request failed: ${error.message}`;
+        pending.body.style.color = "#a04d35";
+      } finally {
+        setBusy(false);
+        input.focus();
+        scrollToBottom();
+      }
+    }
+
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      ask(input.value);
+    });
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        form.requestSubmit();
+      }
+    });
+    document.querySelectorAll(".suggestion").forEach((button) => {
+      button.addEventListener("click", () => ask(button.dataset.query || ""));
+    });
+
+    async function uploadPdf(file) {
+      if (!file) return;
+      if (!file.name.toLowerCase().endsWith(".pdf")) {
+        notice.textContent = "Choose a PDF file.";
+        return;
+      }
+      notice.textContent = `Adding ${file.name}...`;
+      const formData = new FormData();
+      formData.append("file", file);
+      try {
+        const response = await fetch("/ingest", { method: "POST", body: formData });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result?.detail || result?.error?.message || "Upload failed.");
+        notice.textContent = `Indexed ${result.source_doc}: ${result.chunk_count} chunk(s).`;
+        await updateHealth();
+      } catch (error) {
+        notice.textContent = `Upload failed: ${error.message}`;
+      } finally {
+        $("#pdfInput").value = "";
+      }
+    }
+
+    $("#pdfInput").addEventListener("change", (event) => uploadPdf(event.target.files[0]));
+    $("#uploadRail").addEventListener("click", () => $("#pdfInput").click());
+    $("#docsButton").addEventListener("click", () => window.open("/docs", "_blank", "noopener"));
+
+    async function updateHealth() {
+      const dot = $("#healthDot");
+      const label = $("#healthText");
+      const count = $("#chunkCount");
+      try {
+        const response = await fetch("/health");
+        const health = await response.json();
+        if (!response.ok) throw new Error(health?.error?.message || "Service unavailable");
+        dot.className = "health-dot good";
+        label.textContent = "Local index ready";
+        count.textContent = `${health.indexed_chunks} indexed chunks`;
+      } catch {
+        dot.className = "health-dot bad";
+        label.textContent = "Service unavailable";
+        count.textContent = "Check the API and vector store";
+      }
+    }
+    updateHealth();
+  </script>
+</body>
+</html>

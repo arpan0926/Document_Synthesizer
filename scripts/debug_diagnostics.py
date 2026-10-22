@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Quick diagnostics for Chroma, retrieval, and Hugging Face inference."""
+"""Quick diagnostics for Chroma, retrieval, and Ollama inference."""
 from __future__ import annotations
 
 import json
@@ -61,12 +61,12 @@ def main():
         print("Reranked retrieval failed:")
         traceback.print_exc()
 
-    print("\nTesting Hugging Face inference call (short prompt)...")
+    print("\nTesting Ollama inference call (short prompt)...")
     try:
-        out = generation._call_huggingface("Say hello in one sentence.")
-        print("HF response:", out)
+        out = generation._call_ollama("Say hello in one sentence.")
+        print("Ollama response:", out)
     except Exception:
-        print("HF call raised:")
+        print("Ollama call failed:")
         traceback.print_exc()
 
     return 0

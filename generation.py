@@ -25,14 +25,11 @@ def build_answer_prompt(question: str, chunks: List[Dict[str, Any]]) -> Any:
     """Build a LangChain-style prompt object for answer generation."""
     from langchain_core.prompts import PromptTemplate
 
-    context = "\n\n".join(
-        f"[{index}] Source: {chunk.get('metadata', {}).get('source_doc')} Page: {chunk.get('metadata', {}).get('page_number')}\n{chunk.get('content', '')}"
-        for index, chunk in enumerate(chunks, start=1)
-    )
-
     template = (
-        "You are a careful research assistant. Answer the user's query using ONLY the provided context chunks. "
-        "For every factual claim, cite the source as [source_doc, page_number]. If a statement cannot be verified by the context, say so.\n\n"
+        "You are a careful research assistant. Answer using ONLY the provided context. "
+        "For every factual claim, cite the exact source filename and page in the format [filename.pdf, page_number], "
+        "for example [report.pdf, 7]. Do not cite passage numbers or use numeric-only source names. "
+        "If a claim cannot be verified by the context, say so.\n\n"
         "Question: {question}\n\nContext:\n{context}\n\nAnswer:"
     )
     return PromptTemplate(template=template, input_variables=["question", "context"])
@@ -41,14 +38,16 @@ def build_answer_prompt(question: str, chunks: List[Dict[str, Any]]) -> Any:
 def _build_prompt(query: str, chunks: List[Dict[str, Any]]) -> str:
     prompt = build_answer_prompt(query, chunks)
     context = "\n\n".join(
-        f"[{index}] Source: {chunk.get('metadata', {}).get('source_doc')} Page: {chunk.get('metadata', {}).get('page_number')}\n{chunk.get('content', '')}"
-        for index, chunk in enumerate(chunks, start=1)
+        f"Source document: {chunk.get('metadata', {}).get('source_doc')}\n"
+        f"Page: {chunk.get('metadata', {}).get('page_number')}\n"
+        f"Passage:\n{chunk.get('content', '')}"
+        for chunk in chunks
     )
     return prompt.format(question=query, context=context)
 
 
 def _call_ollama(prompt: str) -> str:
-    model = os.getenv("OLLAMA_MODEL", "llama3.1")
+    model = os.getenv("OLLAMA_MODEL", "qwen2.5:7b-instruct")
     payload = {
         "model": model,
         "prompt": prompt,
@@ -65,6 +64,13 @@ def _call_ollama(prompt: str) -> str:
         )
         response.raise_for_status()
         data = response.json()
+    except requests.HTTPError as exc:
+        if exc.response is not None and exc.response.status_code == 404:
+            raise RuntimeError(
+                f"Ollama model '{model}' was not found; run 'ollama pull {model}' "
+                "or set OLLAMA_MODEL to an installed model"
+            ) from exc
+        raise RuntimeError("Ollama inference request failed; verify the configured service is reachable") from exc
     except requests.RequestException as exc:
         raise RuntimeError("Ollama inference request failed; verify the configured service is reachable") from exc
     except ValueError as exc:
@@ -101,9 +107,19 @@ def verify_citations(citations: List[Dict[str, Any]], chunks: List[Dict[str, Any
     return {"valid": valid, "flagged": flagged}
 
 
-def answer_query(query: str, top_k: int = 3) -> Dict[str, Any]:
-    """Retrieve context, generate an answer, and verify citation claims."""
-    chunks = retrieve(query, top_k=top_k)
+def answer_query(
+    query: str,
+    top_k: int = 40,
+    *,
+    candidate_k: int | None = None,
+    result_k: int = 3,
+) -> Dict[str, Any]:
+    """Retrieve a candidate pool, return reranked context, and verify citations.
+
+    ``top_k`` remains as a backwards-compatible alias for ``candidate_k``.
+    """
+    candidate_count = top_k if candidate_k is None else candidate_k
+    chunks = retrieve(query, candidate_k=candidate_count, result_k=result_k)
     prompt = _build_prompt(query, chunks)
     answer_text = _call_ollama(prompt)
     citations = _extract_citations(answer_text)
